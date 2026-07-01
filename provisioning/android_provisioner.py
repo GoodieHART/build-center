@@ -98,7 +98,9 @@ class AndroidProvisioner:
             yes_proc.terminate()
             yes_proc.wait()
 
-    def _run_sdkmanager(self, *args: str) -> subprocess.CompletedProcess:
+    def _run_sdkmanager(
+        self, *args: str, timeout: int = 3600
+    ) -> subprocess.CompletedProcess:
         """Invoke ``sdkmanager`` with *args* and ``--sdk_root={cache_path}``.
 
         Automatically ensures ``sdkmanager`` is downloaded first.
@@ -111,7 +113,7 @@ class AndroidProvisioner:
             check=True,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
         )
 
     @staticmethod
@@ -157,7 +159,7 @@ class AndroidProvisioner:
             check=True,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=600,
         )
 
         cmdline_tools_dir = os.path.join(cache_path, "cmdline-tools")
