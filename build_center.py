@@ -15,12 +15,12 @@ build to a Modal cloud container.
 import modal
 from builders import register, get_builder
 from builders.android_builder import AndroidBuilder
-from provisioning import register as preg
 from provisioning.android_provisioner import AndroidProvisioner
 import utils.wizard as wizard
-from utils.volume import VOLUME_ROOT, commit_volume, sdk_cache_path
 from utils.errors import is_success, is_failure
 from utils.secrets import validate_secret_exists, BUILD_CENTER_SECRET_NAME
+
+VOLUME_ROOT = "/builds"
 
 app = modal.App("build-center")
 
@@ -34,6 +34,9 @@ builder_image = (
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs"
     )
+    .add_local_python_source("builders")
+    .add_local_python_source("provisioning")
+    .add_local_python_source("utils")
 )
 
 # ---------------------------------------------------------------------------
@@ -42,10 +45,7 @@ builder_image = (
 
 volume = modal.Volume.from_name("build-center-cache", create_if_missing=True)
 
-# ---------------------------------------------------------------------------
-# Register builders — allows `get_builder("android")` lookup
-# ---------------------------------------------------------------------------
-
+# Register AndroidBuilder with the builder registry
 register("android")(AndroidBuilder)
 
 # ---------------------------------------------------------------------------
