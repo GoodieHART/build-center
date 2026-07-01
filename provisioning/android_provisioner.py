@@ -99,7 +99,7 @@ class AndroidProvisioner:
             yes_proc.wait()
 
     def _run_sdkmanager(
-        self, *args: str, timeout: int = 3600
+        self, *args: str, timeout: int = 3600, capture_output: bool = True
     ) -> subprocess.CompletedProcess:
         """Invoke ``sdkmanager`` with *args* and ``--sdk_root={cache_path}``.
 
@@ -111,7 +111,7 @@ class AndroidProvisioner:
         return subprocess.run(
             cmd,
             check=True,
-            capture_output=True,
+            capture_output=capture_output,
             text=True,
             timeout=timeout,
         )
@@ -154,10 +154,11 @@ class AndroidProvisioner:
 
         zip_path = os.path.join(cache_path, "cmdline-tools.zip")
         logger.info("Downloading cmdline-tools from %s …", CMDLINE_TOOLS_URL)
+        print("  Downloading SDK command-line tools...")
         subprocess.run(
             ["curl", "-fLo", zip_path, CMDLINE_TOOLS_URL],
             check=True,
-            capture_output=True,
+            capture_output=False,
             text=True,
             timeout=600,
         )
@@ -268,7 +269,8 @@ class AndroidProvisioner:
 
         ensure_dirs(cache_path)
         logger.info("Installing SDK component %s …", version_string)
-        self._run_sdkmanager("--install", version_string)
+        print(f"  Installing {version_string}...")
+        self._run_sdkmanager("--install", version_string, capture_output=False)
 
         # Accept licenses so that subsequent builds don't hang on prompts.
         self._accept_licenses()
