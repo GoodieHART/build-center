@@ -79,6 +79,9 @@ yarn-error.log*
 *.log
 logs/
 
+# OpenCode orchestrator artifacts
+.omo/
+
 # System Files
 .DS_Store
 Thumbs.db
