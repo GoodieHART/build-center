@@ -1,0 +1,50 @@
+=== Task 4: Builder Registry Interface ===
+Date: 2026-07-01
+
+=== Test 1: Builder Registry ===
+$ python -c "
+from builders import register, get_builder, list_builders, BuilderBase
+@register('test_builder')
+class TestBuilder(BuilderBase):
+    name = 'test'
+    def provision(self, config): pass
+    def build(self, config): pass
+print('list_builders():', list_builders())
+print('get_builder name:', get_builder('test_builder').name)
+try:
+    get_builder('nonexistent')
+except KeyError as e:
+    print(f'KeyError: {e}')
+"
+
+Output:
+list_builders(): ['test_builder']
+get_builder name: test
+KeyError: "Unknown builder 'nonexistent'. Available builders: ['test_builder']"
+--- BuilderBase OK ---
+
+=== Test 2: Provisioner Registry ===
+$ python -c "
+from provisioning import register as pregister, get_provisioner as pgetter, list_provisioners
+@pregister('test_prov')
+class TestProvisioner:
+    pass
+print('get_provisioner:', pgetter('test_prov'))
+print('list_provisioners:', list_provisioners())
+try:
+    pgetter('nonexistent')
+except KeyError as e:
+    print(f'KeyError: {e}')
+"
+
+Output:
+get_provisioner: <class '__main__.TestProvisioner'>
+list_provisioners: ['test_prov']
+KeyError: "Unknown provisioner 'nonexistent'. Available provisioners: ['test_prov']"
+--- Provisioner OK ---
+
+=== Test 3: Basic Import ===
+$ python -c "from builders import BuilderBase; print('OK')"
+Output: OK
+
+=== VERDICT: ALL PASS ===

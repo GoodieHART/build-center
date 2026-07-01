@@ -1,0 +1,12 @@
+Task 1 - Archive Verification
+=============================
+Wed Jul  1 16:10:06 UTC 2026
+
+Archived files:
+-rw-rw----. 1 u0_a265 u0_a265 3200 Dec 27  2025 _archive/my-app.py
+-rw-rw----. 1 u0_a265 u0_a265 1080 Dec 27  2025 _archive/pseudo.md
+
+Original locations verified empty:
+ls: cannot access 'pseudo.md': No such file or directory
+ls: cannot access 'my-app.py': No such file or directory
+

@@ -1,0 +1,49 @@
+Task 8: Router + main wizard — wire wizard → provisioner → builder into build_center.py
+====================================================================================
+
+Date: 2026-07-01
+
+Verification Results
+--------------------
+
+1. python3 -m py_compile build_center.py
+   Result: COMPILE OK
+
+2. python3 -c "import build_center; print(build_center.app); print('IMPORT OK')"
+   Result: <modal.App.App object at 0x77c0de41a0>
+           IMPORT OK
+
+Implementation Summary
+----------------------
+
+build_center.py fully implements:
+
+- app = modal.App("build-center")
+- builder_image with JDK 17, git, curl, unzip, build-essential, Node.js 20.x
+- volume = modal.Volume.from_name("build-center-cache", create_if_missing=True)
+- Builder registration: register("android")(AndroidBuilder)
+
+- @app.function(build_android) — Cloud function with:
+  * Image: builder_image
+  * Volumes: {VOLUME_ROOT: volume}
+  * Timeout: 7200, CPU: 4, Memory: 8192
+  * Secrets: [modal.Secret.from_name("build-center-android")]
+  * BUG FIX: Provisions SDK directly via AndroidProvisioner instead of
+    calling AndroidBuilder.provision() which passes a dict to provision_sdk()
+    (which expects a string)
+
+- @app.local_entrypoint(main) — Interactive wizard with all 14 steps:
+  1. Welcome banner
+  2. Build type selection (Android only)
+  3. Repo URL prompt (default: https://github.com/expo/expo.git)
+  4. Branch prompt (default: main)
+  5. Access token prompt (optional)
+  6. SDK platform fetch + fallback to ["android-34", "android-35"]
+  7. Build tools fetch + fallback
+  8. NDK fetch + fallback (with "None" option)
+  9. JDK version selection (11/17/21)
+  10. Build flavor selection (debug/release)
+  11. Build summary + confirmation
+  12. Config assembly + remote dispatch
+  13. Success/error result display with download command
+  14. Invalid input re-prompts on all wizard steps
