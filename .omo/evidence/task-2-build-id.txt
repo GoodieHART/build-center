@@ -1,9 +1,0 @@
-=== Task 2: generate_build_id() verification ===
-
-Command: python -c "from utils.volume import generate_build_id; print(generate_build_id()); print(generate_build_id())"
-
-Output:
-build-20260701T160656-0eed792b
-build-20260701T160656-25ae29ba
-
-Result: PASS — Two consecutive calls produce different unique IDs (different uid[:8] suffixes).
