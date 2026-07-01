@@ -22,7 +22,6 @@ from utils.errors import (
 )
 from utils.volume import (
     VOLUME_ROOT,
-    artifact_path,
     build_run_path,
     commit_volume,
     ensure_dirs,
@@ -282,8 +281,8 @@ class AndroidBuilder(BuilderBase):
 
         # 9. Build download command
         apk_basename = os.path.basename(apk_files[-1])
-        artifact_on_volume = artifact_path(VOLUME_ROOT, build_id, apk_basename)
-        download_cmd = f"modal volume get build-center-cache {artifact_on_volume} ."
+        volume_path = f"/runs/{build_id}/artifacts/{apk_basename}"
+        download_cmd = f"modal volume get build-center-cache {volume_path} ."
 
         return success(
             message=f"Build {build_id} completed successfully",
