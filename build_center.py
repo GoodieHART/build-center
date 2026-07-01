@@ -20,6 +20,7 @@ from provisioning.android_provisioner import AndroidProvisioner
 import utils.wizard as wizard
 from utils.volume import VOLUME_ROOT, commit_volume, sdk_cache_path
 from utils.errors import is_success, is_failure
+from utils.secrets import validate_secret_exists, BUILD_CENTER_SECRET_NAME
 
 app = modal.App("build-center")
 
@@ -228,11 +229,23 @@ def main():
     if ndk_version:
         config["ndk_version"] = ndk_version
 
-    # 13. Dispatch remote build
+    # 13. Validate secret before dispatching remote build
+    if not validate_secret_exists(BUILD_CENTER_SECRET_NAME):
+        wizard.print_error(
+            f"Secret '{BUILD_CENTER_SECRET_NAME}' not found."
+        )
+        print(
+            f"Create it with:\n"
+            f"  modal secret create {BUILD_CENTER_SECRET_NAME} "
+            f"access_token=YOUR_GITHUB_TOKEN"
+        )
+        return
+
+    # 14. Dispatch remote build
     wizard.print_info("Starting build...")
     result = build_android.remote(config)
 
-    # 14. Print result
+    # 15. Print result
     if is_success(result):
         wizard.print_success(result.get("message", "Build completed successfully!"))
         download_cmd = result.get("download_cmd")
