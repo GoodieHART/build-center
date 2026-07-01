@@ -76,6 +76,8 @@ def build_android(config: dict) -> dict:
     builder = builder_cls()
 
     # ---- Provision SDK components directly ----
+    print("--- Provisioning SDK ---")
+
     prov = AndroidProvisioner()
     prov.ensure_sdkmanager()
 
@@ -89,9 +91,11 @@ def build_android(config: dict) -> dict:
         prov.provision_sdk(f"ndk;{config['ndk_version']}")
 
     # ---- Run the build pipeline ----
+    print("--- Building APK ---")
     config["volume"] = volume
     result = builder.build(config)
 
+    print("--- Build complete ---")
     return result
 
 

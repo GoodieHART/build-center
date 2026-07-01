@@ -155,12 +155,14 @@ class AndroidBuilder(BuilderBase):
         if access_token:
             clone_url = repo_url.replace("https://", f"https://{access_token}@")
         try:
+            print(f"  Cloning {repo_url} (branch: {branch})...")
             subprocess.run(
                 ["git", "clone", "--depth=1", "--branch", branch, clone_url, repo_dir],
                 check=True,
-                capture_output=True,
+                capture_output=False,
                 timeout=300,
             )
+            print("  Repository cloned")
             logger.info("Repository cloned into %s", repo_dir)
         except subprocess.TimeoutExpired:
             return failed("clone", "Git clone timed out (300s)", exit_code=124)
@@ -169,13 +171,15 @@ class AndroidBuilder(BuilderBase):
 
         # 3. npm install
         try:
+            print("  Installing npm dependencies...")
             subprocess.run(
                 ["npm", "install"],
                 check=True,
-                capture_output=True,
+                capture_output=False,
                 cwd=repo_dir,
                 timeout=300,
             )
+            print("  npm install complete")
             logger.info("npm install completed")
         except subprocess.TimeoutExpired:
             return failed("npm_install", "npm install timed out (300s)", exit_code=124)
@@ -184,13 +188,15 @@ class AndroidBuilder(BuilderBase):
 
         # 4. npx expo prebuild (non-interactive, graceful on failure)
         try:
+            print("  Running expo prebuild...")
             subprocess.run(
                 ["npx", "expo", "prebuild", "--non-interactive"],
                 check=True,
-                capture_output=True,
+                capture_output=False,
                 cwd=repo_dir,
                 timeout=300,
             )
+            print("  expo prebuild complete")
             logger.info("expo prebuild completed")
         except subprocess.TimeoutExpired:
             return failed(
@@ -222,13 +228,15 @@ class AndroidBuilder(BuilderBase):
             )
 
         try:
+            print("  Running Gradle build (this may take a while)...")
             subprocess.run(
                 ["./gradlew", "assembleRelease"],
                 check=True,
-                capture_output=True,
+                capture_output=False,
                 cwd=android_dir,
                 timeout=1200,
             )
+            print("  Gradle build complete")
             logger.info("Gradle assembleRelease completed")
         except subprocess.TimeoutExpired:
             return failed(
