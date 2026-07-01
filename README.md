@@ -1,8 +1,10 @@
 # Build Center
 
-A cloud-native Android build orchestrator built on [Modal](https://modal.com/). Offload heavy Gradle/Expo builds to Modal's serverless GPU/CPU infrastructure — no more waiting on slow local hardware.
+A MASSIVE upgrade from the initial base project "GradleJail". Build Center aims to be cloud-native multi-project, multi-architecture build orchestrator built on [Modal](https://modal.com/). For now we'll be starting with basic "Android APK" builds. 
 
-Born from the frustration of building Android apps on a Celeron N3150, Build Center wraps the full build pipeline (SDK provisioning, repo cloning, dependency installation, Gradle compilation) into a single `modal run` command.
+No longer worry about the INSANE stress about YAML with Github Actions, now it's a simple dropdown interface for environment configuration. Offload heavy project builds to Modal's serverless GPU/CPU infrastructure — no more waiting on slow local hardware.
+
+Born from the frustration of building Android apps on a Celeron N3150 😅, Build Center wraps the full build pipeline (SDK provisioning, repo cloning, dependency installation, Gradle compilation, more to come...) into a single `modal run` command.
 
 ---
 
@@ -120,7 +122,7 @@ The main `build_center.py` Modal app ties everything together:
 
 ## Motivation
 
-Your Celeron deserves a break. My N3150 was taking ages for even the simplest builds, so I thought — why not let Modal do the heavy lifting? And thus, GradleJail (later reincarnated as Build Center) was born.
+Our Potatoe PCs need a break 😉Your Celeron deserves a break. My N3150 was taking ages for even the simplest builds, so I thought... why not let Modal do the heavy lifting i mean its there 😂? And thus, GradleJail (later reincarnated as Build Center) was born.
 
 ---
 
@@ -148,4 +150,3 @@ print('ALL IMPORTS OK')
 
 - `build_center.py` runs locally (`modal run`) — it only uses Modal for the cloud build function, not for deployment
 - SDK components are cached in the `build-center-cache` Modal Volume and reused across builds
-- The nested `build-center/` directory (old standalone project) has been migrated into the `builders/` and `provisioning/` packages
