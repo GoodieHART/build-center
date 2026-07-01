@@ -1,0 +1,17 @@
+=== task-7-error-contracts ===
+COMPILE OK: python3 -m py_compile utils/errors.py
+
+success(): status=success, message=ok, artifacts=['apk'], download_cmd=get cmd
+failed():  status=failed, stage=gradle, exit_code=1
+error():   status=error, message=timeout, stage=network
+
+is_success(success)=True
+is_success(failed)=False
+is_failure(failed)=True
+is_failure(error)=True
+
+BuildError: result.status=error, str=something broke
+handle_subprocess_error(CalledProcessError): exit_code=1, stage=gradle
+handle_subprocess_error(generic): message=ValueError: network timeout
+
+ALL OK

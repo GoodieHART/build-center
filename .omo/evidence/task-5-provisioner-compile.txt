@@ -1,0 +1,27 @@
+=== Task 5: Android Provisioner Compile/Import Evidence ===
+Date: 2026-07-01
+
+=== COMPILE CHECK ===
+python3 -m py_compile provisioning/android_provisioner.py → COMPILE OK
+
+=== IMPORT CHECK ===
+python3 -c "from provisioning.android_provisioner import AndroidProvisioner; print('IMPORT OK')" → IMPORT OK
+
+=== REGISTRY CHECK ===
+Registered provisioners: ['android']
+AndroidProvisioner class: AndroidProvisioner
+Instance attributes: android
+Has provision: True
+Has ensure_sdkmanager: True
+Has fetch_available_platforms: True
+Has fetch_available_build_tools: True
+Has fetch_available_ndk: True
+Has provision_sdk: True
+
+=== PARSER UNIT TESTS ===
+Platforms: ['platforms;android-34', 'platforms;android-35']
+Build tools: ['build-tools;34.0.0', 'build-tools;35.0.0']
+NDK versions: ['ndk;27.0.12077973']
+CMDLINE_TOOLS_URL constant: valid
+_cache_fresh logic: verified
+_parse_sdkmanager_output with empty input: returns []
