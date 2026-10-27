@@ -13,6 +13,7 @@ build to a Modal cloud container.
 """
 
 import modal
+import os
 from builders import register, get_builder
 from builders.android_builder import AndroidBuilder
 from provisioning.android_provisioner import AndroidProvisioner
@@ -30,10 +31,16 @@ app = modal.App("build-center")
 
 builder_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("openjdk-17-jdk", "git", "curl", "unzip", "build-essential")
+    .apt_install("openjdk-17-jdk", "git", "curl", "unzip", "build-essential", "xz-utils")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs"
     )
+    .run_commands(
+        "git clone --depth=1 -b stable https://github.com/flutter/flutter.git /opt/flutter",
+        "export PATH=/opt/flutter/bin:$PATH && flutter precache --android",
+        "curl -fsSL -o /usr/local/bin/bundletool.jar https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar",
+    )
+    .env({"FLUTTER_ROOT": "/opt/flutter", "PATH": "/opt/flutter/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "PUB_CACHE": "/builds/.cache/pub", "GRADLE_USER_HOME": "/builds/.cache/gradle", "BUILD_CENTER_CACHE_BUST": "6"})
     .add_local_python_source("builders")
     .add_local_python_source("provisioning")
     .add_local_python_source("utils")
@@ -57,8 +64,8 @@ register("android")(AndroidBuilder)
     image=builder_image,
     volumes={VOLUME_ROOT: volume},
     timeout=7200,
-    cpu=4,
-    memory=8192,
+    cpu=8,
+    memory=16384,
     secrets=[modal.Secret.from_name("build-center-android")],
 )
 def build_android(config: dict) -> dict:
@@ -90,6 +97,10 @@ def build_android(config: dict) -> dict:
     if "ndk_version" in config and config["ndk_version"]:
         prov.provision_sdk(f"ndk;{config['ndk_version']}")
 
+    # ---- Ensure shared build caches exist on the volume ----
+    for cache_dir in ("/builds/.cache/pub", "/builds/.cache/gradle"):
+        os.makedirs(cache_dir, exist_ok=True)
+
     # ---- Run the build pipeline ----
     print("--- Building APK ---")
     config["volume"] = volume
@@ -102,6 +113,44 @@ def build_android(config: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Local entrypoint — interactive wizard
 # ---------------------------------------------------------------------------
+
+
+@app.local_entrypoint()
+def test_build():
+    """Non-interactive test build of roxum-ide (Flutter, base variant)."""
+    config = {
+        "repo_url": "https://github.com/GoodieHART/roxum-ide.git",
+        "branch": "playstore-version",
+        "sdk_platform": "36",
+        "build_tools": "35.0.0",
+        "jdk_version": "17",
+        "build_flavor": "release",
+        "ndk_version": "27.0.12077973",
+        "flutter_version": "stable",
+        "build_variant": "base",
+    }
+    print("Dispatching test build...")
+    result = build_android.remote(config)
+    print("RESULT:", result)
+
+
+@app.local_entrypoint()
+def test_build_full():
+    """Non-interactive test build of roxum-ide (Flutter, full/monolithic variant)."""
+    config = {
+        "repo_url": "https://github.com/GoodieHART/roxum-ide.git",
+        "branch": "playstore-version",
+        "sdk_platform": "36",
+        "build_tools": "35.0.0",
+        "jdk_version": "17",
+        "build_flavor": "release",
+        "ndk_version": "27.0.12077973",
+        "flutter_version": "stable",
+        "build_variant": "full",
+    }
+    print("Dispatching full test build...")
+    result = build_android.remote(config)
+    print("RESULT:", result)
 
 
 @app.local_entrypoint()
@@ -141,7 +190,18 @@ def main():
     # 4. Branch
     branch = wizard.prompt_string("Branch", default="main")
 
-    # 5. Access token (optional — leave blank for public repos)
+    # 5. Flutter version (only used for Flutter projects; ignored otherwise)
+    flutter_version = wizard.prompt_string(
+        "Flutter version (only used for Flutter projects)",
+        default="stable",
+    )
+
+    # 6. Build variant (base = on-demand dynamic features; full = monolithic)
+    build_variant = wizard.select_option(
+        ["base", "full"], "Select build variant (base/full)"
+    )
+
+    # 7. Access token (optional — leave blank for public repos)
     access_token = wizard.prompt_string(
         "Access token (leave blank for public repos)"
     )
@@ -155,7 +215,7 @@ def main():
             {p.replace("platforms;android-", "android-") for p in raw_platforms}
         )
     except Exception:
-        sdk_platform_options = ["android-34", "android-35"]
+        sdk_platform_options = ["android-35", "android-36"]
 
     wizard.display_options(sdk_platform_options, "Available SDK Platforms")
     selected_platform = wizard.select_option(
@@ -170,7 +230,7 @@ def main():
             {t.replace("build-tools;", "") for t in raw_tools}
         )
     except Exception:
-        build_tools_options = ["34.0.0"]
+        build_tools_options = ["35.0.0", "36.0.0"]
 
     wizard.display_options(build_tools_options, "Available Build Tools")
     build_tools = wizard.select_option(
@@ -206,6 +266,8 @@ def main():
         "Build Type": build_type,
         "Repo URL": repo_url,
         "Branch": branch,
+        "Flutter Version": flutter_version,
+        "Build Variant": build_variant,
         "Access Token": "***" if access_token else "(none)",
         "SDK Platform": selected_platform,
         "Build Tools": build_tools,
@@ -227,6 +289,8 @@ def main():
         "build_tools": build_tools,
         "jdk_version": jdk_version,
         "build_flavor": build_flavor,
+        "flutter_version": flutter_version,
+        "build_variant": build_variant,
     }
     if access_token:
         config["access_token"] = access_token
