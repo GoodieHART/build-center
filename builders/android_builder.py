@@ -193,6 +193,46 @@ class AndroidBuilder(BuilderBase):
         except subprocess.CalledProcessError as exc:
             return handle_subprocess_error(exc, "clone")
 
+        # 2b. Materialize Git LFS objects (compilers/interpreters live in LFS).
+        try:
+            print("  Pulling Git LFS objects...")
+            subprocess.run(
+                ["git", "lfs", "install", "--local"],
+                check=True,
+                capture_output=True,
+                cwd=repo_dir,
+                timeout=60,
+            )
+            subprocess.run(
+                ["git", "lfs", "pull"],
+                check=True,
+                capture_output=True,
+                cwd=repo_dir,
+                timeout=1800,
+            )
+            print("  Git LFS objects pulled")
+            logger.info("Git LFS objects pulled into %s", repo_dir)
+        except FileNotFoundError:
+            return failed(
+                "lfs",
+                "git-lfs is not installed in the build image",
+                exit_code=127,
+            )
+        except subprocess.TimeoutExpired:
+            return failed("lfs", "Git LFS pull timed out (1800s)", exit_code=124)
+        except subprocess.CalledProcessError as exc:
+            return handle_subprocess_error(exc, "lfs")
+
+        # 2c. Fail loudly if any LFS object is still a pointer stub.
+        pointer_files = find_unmaterialized_lfs_files(repo_dir)
+        if pointer_files:
+            return failed(
+                "lfs",
+                "Unmaterialized Git LFS pointer files (payloads would be empty "
+                "in the APK): " + ", ".join(pointer_files),
+                exit_code=1,
+            )
+
         # 3. Detect project type
         project_type, build_root = detect_project_type(repo_dir)
         print(f"  Detected project type: {project_type}")
@@ -379,12 +419,13 @@ class AndroidBuilder(BuilderBase):
             if apks_out and os.path.isfile(apks_out):
                 universal = os.path.join(artifacts_dir, "app-release-universal.apk")
                 try:
-                    subprocess.run(
-                        ["unzip", "-p", apks_out, "universal.apk"],
-                        stdout=open(universal, "wb"),
-                        check=True,
-                        timeout=120,
-                    )
+                    with open(universal, "wb") as universal_out:
+                        subprocess.run(
+                            ["unzip", "-p", apks_out, "universal.apk"],
+                            stdout=universal_out,
+                            check=True,
+                            timeout=120,
+                        )
                     if os.path.isfile(universal) and os.path.getsize(universal) > 0:
                         apk_files = [universal]
                 except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -392,11 +433,7 @@ class AndroidBuilder(BuilderBase):
 
             # Fallback: if bundletool/extraction failed, ship the AAB.
             if not apk_files:
-                for aab in aab_files:
-                    dest = os.path.join(artifacts_dir, os.path.basename(aab))
-                    shutil.copy2(aab, dest)
-                    apk_files.append(dest) if False else None
-                # Report AAB as the artifact instead.
+                # Report the AAB as the artifact instead.
                 artifact_paths_aab = []
                 for aab in aab_files:
                     dest = os.path.join(artifacts_dir, os.path.basename(aab))
@@ -482,37 +519,13 @@ class AndroidBuilder(BuilderBase):
             download_cmd=download_cmd,
         )
 
-        artifact_paths: List[str] = []
-        for apk in apk_files:
-            dest = os.path.join(artifacts_dir, os.path.basename(apk))
-            shutil.copy2(apk, dest)
-            artifact_paths.append(dest)
-            logger.info("Artifact saved: %s", dest)
-
-        # 8. Commit volume
-        if volume is not None:
-            try:
-                commit_volume(volume)
-            except Exception as exc:
-                logger.warning("Volume commit failed: %s", exc)
-
-        # 9. Build download command
-        apk_basename = os.path.basename(apk_files[-1])
-        volume_path = f"/runs/{build_id}/artifacts/{apk_basename}"
-        download_cmd = f"modal volume get build-center-cache {volume_path} ."
-
-        variant_note = " (full/monolithic)" if build_variant == "full" else ""
-        return success(
-            message=f"Build {build_id} completed successfully{variant_note}",
-            artifacts=artifact_paths,
-            download_cmd=download_cmd,
-        )
-
     # ------------------------------------------------------------------
     # Shared Gradle build + artifact collection
     # ------------------------------------------------------------------
 
     def _gradle_build_and_collect(self, config, build_id, repo_dir, android_dir, artifacts_dir, volume, stage_prefix="gradle"):
+        sdk_path = sdk_cache_path(VOLUME_ROOT).rstrip("/")
+
         # Write local.properties
         local_props_path = os.path.join(android_dir, "local.properties")
         try:
