@@ -18,6 +18,21 @@ The interactive wizard will guide you through selecting a repository, SDK config
 
 ---
 
+## Supported project types
+
+Build Center auto-detects the project type after cloning:
+
+- **Flutter** — `pubspec.yaml` with `flutter:` + `sdk: flutter`
+- **Expo / React Native** — `package.json` with an `expo` dependency
+- **Plain Gradle** (Kotlin/Java/Compose) — `gradlew` at repo root or `android/`
+
+Build variants (Flutter):
+
+- **base** — standard `flutter build apk` (dynamic feature modules stay on-demand; small APK)
+- **full** — `flutter build appbundle` + bundletool universal APK (all modules bundled into one APK)
+
+The wizard now prompts for a Flutter version (default `stable`) and a build variant (`base`/`full`).
+
 ## Prerequisites
 
 - [Modal CLI](https://modal.com/docs/guide) installed and authenticated (`modal token set --token-id ... --token-secret ...`)
