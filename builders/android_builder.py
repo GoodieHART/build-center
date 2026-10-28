@@ -32,6 +32,45 @@ from utils.volume import (
 logger = logging.getLogger(__name__)
 
 
+def find_unmaterialized_lfs_files(repo_dir: str, limit: int = 5) -> List[str]:
+    """Return tracked LFS files that are still pointer stubs, not real objects.
+
+    Compilers and interpreters in some repos (e.g. roxum-ide) are stored in
+    Git LFS. When LFS is missing or not pulled, ``git clone`` leaves ~130-byte
+    pointer files behind and the resulting APK embeds empty payloads that look
+    like they downloaded fine but install nothing.
+    """
+    try:
+        listed = subprocess.run(
+            ["git", "lfs", "ls-files"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_dir,
+            timeout=120,
+        ).stdout
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return []
+
+    pointers: List[str] = []
+    for line in listed.splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) != 3:
+            continue
+        _oid, marker, path = parts
+        # '*' means the object is present locally, '-' means still a pointer.
+        if marker != "-":
+            continue
+        pointers.append(path)
+        if len(pointers) >= limit:
+            break
+    return pointers
+
+
 @register("android")
 class AndroidBuilder(BuilderBase):
     """Build Android apps from a Git repository (Expo / React Native).
@@ -167,6 +206,46 @@ class AndroidBuilder(BuilderBase):
             return failed("clone", "Git clone timed out (300s)", exit_code=124)
         except subprocess.CalledProcessError as exc:
             return handle_subprocess_error(exc, "clone")
+
+        # 2b. Materialize Git LFS objects (compilers/interpreters live in LFS).
+        try:
+            print("  Pulling Git LFS objects...")
+            subprocess.run(
+                ["git", "lfs", "install", "--local"],
+                check=True,
+                capture_output=True,
+                cwd=repo_dir,
+                timeout=60,
+            )
+            subprocess.run(
+                ["git", "lfs", "pull"],
+                check=True,
+                capture_output=True,
+                cwd=repo_dir,
+                timeout=1800,
+            )
+            print("  Git LFS objects pulled")
+            logger.info("Git LFS objects pulled into %s", repo_dir)
+        except FileNotFoundError:
+            return failed(
+                "lfs",
+                "git-lfs is not installed in the build image",
+                exit_code=127,
+            )
+        except subprocess.TimeoutExpired:
+            return failed("lfs", "Git LFS pull timed out (1800s)", exit_code=124)
+        except subprocess.CalledProcessError as exc:
+            return handle_subprocess_error(exc, "lfs")
+
+        # 2c. Fail loudly if any LFS object is still a pointer stub.
+        pointer_files = find_unmaterialized_lfs_files(repo_dir)
+        if pointer_files:
+            return failed(
+                "lfs",
+                "Unmaterialized Git LFS pointer files (payloads would be empty "
+                "in the APK): " + ", ".join(pointer_files),
+                exit_code=1,
+            )
 
         # 3. npm install
         try:
