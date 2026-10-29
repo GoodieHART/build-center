@@ -73,13 +73,16 @@ When you run `modal run build_center.py`, the wizard walks you through:
 1. **Build type** — Android (only option in MVP)
 2. **Repository URL** — e.g., `https://github.com/expo/expo.git`
 3. **Branch** — e.g., `main` or `sdk-50`
-4. **Access token** — optional, for private repos
-5. **SDK platform** — fetches available Android API levels from Google's `sdkmanager`
-6. **Build-tools version** — fetches available build-tools versions
-7. **NDK version** — fetches available NDK versions (optional — select "None" to skip)
-8. **JDK version** — choose 11, 17, or 21
-9. **Build flavor** — `debug` or `release`
-10. **Summary & confirmation** — review your selections before dispatching
+4. **Flutter version** — default `stable` (Flutter projects only)
+5. **Build variant** — `base` (on-demand features) or `full` (monolithic AAB)
+6. **Payloads** — base variant only: `all`, comma-separated keys, or blank for none
+7. **Access token** — optional, for private repos
+8. **SDK platform** — fetches available Android API levels from Google's `sdkmanager`
+9. **Build-tools version** — fetches available build-tools versions
+10. **NDK version** — fetches available NDK versions (optional — select "None" to skip)
+11. **JDK version** — choose 11, 17, or 21
+12. **Build flavor** — `debug` or `release`
+13. **Summary & confirmation** — review your selections before dispatching
 
 Once confirmed, the build runs entirely in Modal's cloud:
 

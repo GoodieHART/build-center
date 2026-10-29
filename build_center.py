@@ -155,7 +155,6 @@ def test_build_full():
         "ndk_version": "27.0.12077973",
         "flutter_version": "stable",
         "build_variant": "full",
-        "payloads": "all",
     }
     print("Dispatching full test build...")
     result = build_android.remote(config)
@@ -187,6 +186,22 @@ def test_build_bundled():
     print("RESULT:", result)
 
 
+def _parse_payload_selection(raw: str) -> str:
+    """Normalize a wizard payload selection into the value Gradle receives.
+
+    Accepts ``all``, an empty string / ``none``, or a comma-separated list of
+    module keys. Returns ``""`` when nothing should be staged, otherwise
+    ``"all"`` or a de-duplicated comma-separated list.
+    """
+    tokens = [token.strip() for token in raw.split(",") if token.strip()]
+    tokens = [token for token in tokens if token.lower() != "none"]
+    if not tokens:
+        return ""
+    if any(token.lower() == "all" for token in tokens):
+        return "all"
+    return ",".join(dict.fromkeys(tokens))
+
+
 @app.local_entrypoint()
 def main():
     """Interactive build wizard that collects configuration and dispatches.
@@ -197,15 +212,18 @@ def main():
     2.  Select build type (Android — only option for MVP)
     3.  Prompt for repository URL
     4.  Prompt for branch
-    5.  Prompt for access token (optional, private repos)
-    6.  Fetch & select SDK platform
-    7.  Fetch & select build-tools version
-    8.  Fetch & select NDK version
-    9.  Select JDK version (11 / 17 / 21)
-    10. Select build flavor (debug / release)
-    11. Show build summary and confirm
-    12. If confirmed: call ``build_android.remote(config)``
-    13. Print result with download command or error details
+    5.  Prompt for Flutter version
+    6.  Select build variant (base / full)
+    7.  Prompt for payloads to fuse (base variant only)
+    8.  Prompt for access token (optional, private repos)
+    9.  Fetch & select SDK platform
+    10. Fetch & select build-tools version
+    11. Fetch & select NDK version
+    12. Select JDK version (11 / 17 / 21)
+    13. Select build flavor (debug / release)
+    14. Show build summary and confirm
+    15. If confirmed: call ``build_android.remote(config)``
+    16. Print result with download command or error details
     """
 
     # 1. Welcome
@@ -234,6 +252,20 @@ def main():
     build_variant = wizard.select_option(
         ["base", "full"], "Select build variant (base/full)"
     )
+
+    # 6b. Payload bundling — base variant only. The AAB path already carries every
+    # dynamic feature, so staging payloads into its base module would duplicate them.
+    payloads = ""
+    if build_variant == "base":
+        wizard.print_info(
+            "Payloads are the runtime/extension modules fused into the APK "
+            "(keys live in android/payloads.properties)."
+        )
+        payloads = _parse_payload_selection(
+            wizard.prompt_string(
+                "Payloads to fuse ('all', comma-separated keys, or blank for none)"
+            )
+        )
 
     # 7. Access token (optional — leave blank for public repos)
     access_token = wizard.prompt_string(
@@ -302,6 +334,7 @@ def main():
         "Branch": branch,
         "Flutter Version": flutter_version,
         "Build Variant": build_variant,
+        "Bundled Payloads": payloads if payloads else "(none)",
         "Access Token": "***" if access_token else "(none)",
         "SDK Platform": selected_platform,
         "Build Tools": build_tools,
@@ -330,6 +363,8 @@ def main():
         config["access_token"] = access_token
     if ndk_version:
         config["ndk_version"] = ndk_version
+    if payloads:
+        config["payloads"] = payloads
 
     # 13. Validate secret before dispatching remote build
     if not validate_secret_exists(BUILD_CENTER_SECRET_NAME):
