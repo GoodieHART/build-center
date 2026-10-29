@@ -155,8 +155,34 @@ def test_build_full():
         "ndk_version": "27.0.12077973",
         "flutter_version": "stable",
         "build_variant": "full",
+        "payloads": "all",
     }
     print("Dispatching full test build...")
+    result = build_android.remote(config)
+    print("RESULT:", result)
+
+
+@app.local_entrypoint()
+def test_build_bundled():
+    """Non-interactive test build with every payload fused into the base APK.
+
+    Uses the plain ``flutter build apk`` path (no AAB, no bundletool): the
+    ``stagePayloads`` Gradle task copies each selected dynamic-feature payload
+    into the base module, so one self-contained APK ships them.
+    """
+    config = {
+        "repo_url": "https://github.com/GoodieHART/roxum-ide.git",
+        "branch": "playstore-version",
+        "sdk_platform": "36",
+        "build_tools": "35.0.0",
+        "jdk_version": "17",
+        "build_flavor": "release",
+        "ndk_version": "27.0.12077973",
+        "flutter_version": "stable",
+        "build_variant": "base",
+        "payloads": "all",
+    }
+    print("Dispatching bundled test build...")
     result = build_android.remote(config)
     print("RESULT:", result)
 

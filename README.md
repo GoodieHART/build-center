@@ -31,6 +31,21 @@ Build variants (Flutter):
 - **base** — standard `flutter build apk` (dynamic feature modules stay on-demand; small APK)
 - **full** — `flutter build appbundle` + bundletool universal APK (all modules bundled into one APK)
 
+### Bundled payloads (`payloads`)
+
+A plain `flutter build apk` never packages dynamic-feature payloads — only `bundleRelease`
+sees them. Setting `payloads` fuses a chosen subset into the base module instead, so one
+self-contained APK ships them with no AAB + bundletool round-trip:
+
+- `payloads: "all"` — every module in `android/payloads.properties`
+- `payloads: "python,node,bash-language-server"` — a subset
+- unset — nothing fused (Play / AAB path stays lean)
+
+The builder passes the selection as `ORG_GRADLE_PROJECT_payloads` (Flutter does not forward
+arbitrary `-P` flags), and afterwards unzips the APK to assert that every expected
+`assets/*.zip` and `lib/arm64-v8a/*.so` is actually present. A build that silently ships an
+empty payload set fails with `verify_payloads` instead of producing a misleadingly small APK.
+
 The wizard now prompts for a Flutter version (default `stable`) and a build variant (`base`/`full`).
 
 ## Prerequisites

@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from builders import BuilderBase, register
@@ -311,6 +312,82 @@ class AndroidBuilder(BuilderBase):
     # Flutter pipeline
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Bundled payload verification
+    # ------------------------------------------------------------------
+
+    def _expected_payload_entries(self, repo_dir: str, selection: str) -> List[str]:
+        """Resolve the APK entries a payload selection must produce.
+
+        Mirrors the ``stagePayloads`` task in ``android/app/build.gradle.kts``:
+        each selected dynamic feature contributes ``assets/*.zip`` and
+        ``jniLibs/arm64-v8a/*.so`` to the base module.
+        """
+        catalog_path = os.path.join(repo_dir, "android", "payloads.properties")
+        if not os.path.isfile(catalog_path):
+            logger.warning("No payloads.properties at %s; skipping payload verification", catalog_path)
+            return []
+
+        catalog: Dict[str, str] = {}
+        with open(catalog_path, encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                catalog[key.strip()] = value.strip()
+
+        if selection == "all":
+            keys = sorted(catalog)
+        else:
+            keys = [key.strip() for key in selection.split(",") if key.strip()]
+
+        entries: List[str] = []
+        for key in keys:
+            feature = catalog.get(key)
+            if feature is None:
+                logger.warning("Payload %r is not declared in payloads.properties", key)
+                continue
+            feature_main = os.path.join(repo_dir, "android", "app", "src", feature, "src", "main")
+            for subdir, prefix, suffix in (
+                ("assets", "assets", ".zip"),
+                (os.path.join("jniLibs", "arm64-v8a"), "lib/arm64-v8a", ".so"),
+            ):
+                directory = os.path.join(feature_main, subdir)
+                if not os.path.isdir(directory):
+                    continue
+                for name in sorted(os.listdir(directory)):
+                    if name.endswith(suffix):
+                        entries.append(f"{prefix}/{name}")
+        return entries
+
+    def _verify_bundled_payloads(self, apk_path: str, repo_dir: str, selection: str):
+        """Fail the build if the APK is missing any selected payload entry."""
+        expected = self._expected_payload_entries(repo_dir, selection)
+        if not expected:
+            return None
+
+        try:
+            with zipfile.ZipFile(apk_path) as archive:
+                present = set(archive.namelist())
+        except (OSError, zipfile.BadZipFile) as exc:
+            return failed("verify_payloads", f"Cannot inspect APK {apk_path}: {exc}", exit_code=1)
+
+        missing = [entry for entry in expected if entry not in present]
+        if missing:
+            print(f"  PAYLOAD VERIFICATION FAILED: {len(missing)}/{len(expected)} entries missing")
+            for entry in missing[:20]:
+                print(f"    missing: {entry}")
+            return failed(
+                "verify_payloads",
+                f"APK {os.path.basename(apk_path)} is missing {len(missing)} of "
+                f"{len(expected)} bundled payload entries: {', '.join(missing[:8])}",
+                exit_code=1,
+            )
+
+        print(f"  Payload verification passed: {len(expected)} entries present")
+        return None
+
     def _build_flutter(self, config, build_id, repo_dir, build_root, artifacts_dir, volume):
         build_flavor = config.get("build_flavor", "release")
         flutter_version = config.get("flutter_version") or DEFAULT_FLUTTER_VERSION
@@ -365,6 +442,14 @@ class AndroidBuilder(BuilderBase):
         env["ANDROID_HOME"] = sdk_path
         env["ANDROID_SDK_ROOT"] = sdk_path
         env["GRADLE_OPTS"] = "-Dorg.gradle.parallel=true -Dorg.gradle.workers.max=8"
+
+        # Gradle reads ORG_GRADLE_PROJECT_<name> as a project property, which is how
+        # `flutter build apk` (it does not forward arbitrary -P flags) learns which
+        # dynamic-feature payloads to stage into the base module.
+        payload_selection = str(config.get("payloads") or "").strip()
+        if payload_selection:
+            env["ORG_GRADLE_PROJECT_payloads"] = payload_selection
+            print(f"  Bundling payloads: {payload_selection}")
 
         build_mode_flag = "--release" if build_flavor == "release" else "--debug"
 
@@ -489,6 +574,11 @@ class AndroidBuilder(BuilderBase):
 
         if not apk_files:
             return failed("verify_apk", "No APK artifacts produced", exit_code=1)
+
+        if payload_selection:
+            payload_failure = self._verify_bundled_payloads(apk_files[-1], repo_dir, payload_selection)
+            if payload_failure is not None:
+                return payload_failure
 
         artifact_paths: List[str] = []
         for apk in apk_files:
