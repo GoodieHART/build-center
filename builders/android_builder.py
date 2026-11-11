@@ -602,6 +602,19 @@ class AndroidBuilder(BuilderBase):
         # Gradle resolves storeFile relative to the app module dir (android/app/),
         # so place the keystore there.
         keystore = os.path.join(app_dir, "debug.keystore")
+        # Reuse a persistent debug keystore from the shared Modal volume so
+        # that every build signs with the SAME certificate — otherwise Android
+        # refuses in-place upgrades ("signatures do not match").
+        persistent_dir = os.path.join(VOLUME_ROOT, ".cache", "signing")
+        persistent_keystore = os.path.join(persistent_dir, "debug.keystore")
+        ensure_dirs(persistent_dir)
+        if os.path.isfile(persistent_keystore):
+            try:
+                import shutil
+                shutil.copyfile(persistent_keystore, keystore)
+                logger.info("Reused persistent debug keystore from %s", persistent_keystore)
+            except OSError as exc:
+                logger.warning("Could not copy persistent keystore: %s", exc)
         if not os.path.isfile(keystore):
             try:
                 subprocess.run(
@@ -624,6 +637,21 @@ class AndroidBuilder(BuilderBase):
             except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
                 logger.warning("Could not generate debug keystore: %s", exc)
                 return
+            # Persist the newly generated keystore for future builds.
+            try:
+                import shutil
+                shutil.copyfile(keystore, persistent_keystore)
+                logger.info("Persisted debug keystore to %s", persistent_keystore)
+            except OSError as exc:
+                logger.warning("Could not persist debug keystore: %s", exc)
+        elif not os.path.isfile(persistent_keystore):
+            # Keystore exists locally but not yet persisted — persist it.
+            try:
+                import shutil
+                shutil.copyfile(keystore, persistent_keystore)
+                logger.info("Persisted debug keystore to %s", persistent_keystore)
+            except OSError as exc:
+                logger.warning("Could not persist debug keystore: %s", exc)
         try:
             with open(key_props, "w") as fh:
                 fh.write("storePassword=android\n")
