@@ -206,9 +206,10 @@ def main():
         "Access token (leave blank for public repos)"
     )
 
-    # 7b. Optional Java JDK payload URL (injected at build time)
+    # 7b. Java JDK payload URL (auto-injected at build time)
     java_jdk_url = wizard.prompt_string(
-        "Java JDK zip URL (optional, leave blank to skip)"
+        "Java JDK zip URL",
+        default="https://github.com/zryyoung/openjdk-Termux/releases/download/openjdk-21.0.1/openjdk-21.0.1-aarch64.zip",
     )
 
     # 6. Fetch / fallback for SDK platforms
