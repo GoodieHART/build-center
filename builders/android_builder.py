@@ -406,6 +406,9 @@ class AndroidBuilder(BuilderBase):
                     exit_code=1,
                 )
 
+        # 6b. Extreme compression pass on produced APKs (zipalign + advzip if available)
+        apk_files = [self._compress_apk(p) for p in apk_files]
+
         # 7. Collect artifacts (base variant apk files are already in apk_files)
         if build_variant == "base":
             pass  # apk_files already populated
@@ -662,6 +665,47 @@ class AndroidBuilder(BuilderBase):
         except OSError as exc:
             logger.warning("Could not write key.properties: %s", exc)
 
+    def _compress_apk(self, apk_path: str) -> str:
+        """Best-effort extreme compression of an APK.
+
+        Runs ``zipalign`` (from the Android build-tools) to 4-byte align
+        entries, then ``advzip -z4`` (advancecomp) if available for an extra
+        recompression pass that does not alter the APK structure. Both steps
+        are optional and skipped gracefully when the tooling is missing.
+        """
+        if not os.path.isfile(apk_path):
+            return apk_path
+        aligned = apk_path + ".aligned"
+        # 1. zipalign
+        build_tools = None
+        try:
+            import glob as _g
+            candidates = _g.glob("/builds/.cache/sdk/android/build-tools/*/zipalign")
+            if candidates:
+                build_tools = sorted(candidates)[-1]
+        except Exception:
+            build_tools = None
+        if build_tools and os.path.isfile(build_tools):
+            try:
+                subprocess.run([build_tools, "-f", "4", apk_path, aligned],
+                               check=True, capture_output=True, timeout=300)
+                if os.path.isfile(aligned):
+                    os.replace(aligned, apk_path)
+                    logger.info("zipaligned %s", apk_path)
+            except Exception as exc:
+                logger.warning("zipalign failed: %s", exc)
+                if os.path.isfile(aligned):
+                    os.remove(aligned)
+        # 2. advzip (extra recompression) if present
+        if shutil.which("advzip"):
+            try:
+                subprocess.run(["advzip", "-z4", apk_path],
+                               check=True, capture_output=True, timeout=600)
+                logger.info("advzip recompressed %s", apk_path)
+            except Exception as exc:
+                logger.warning("advzip failed: %s", exc)
+        return apk_path
+
     @staticmethod
     def _enable_gradle_parallelism(android_dir: str) -> None:
         """Ensure Gradle runs in parallel with extra workers."""
@@ -680,6 +724,7 @@ class AndroidBuilder(BuilderBase):
             "org.gradle.caching": "true",
             "org.gradle.daemon": "true",
             "org.gradle.configureondemand": "true",
+            "android.enableR8.fullMode": "true",
         }
         lines = existing.splitlines() if existing else []
         present = {ln.split("=", 1)[0].strip() for ln in lines if "=" in ln}
