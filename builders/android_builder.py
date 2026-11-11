@@ -338,7 +338,9 @@ class AndroidBuilder(BuilderBase):
                 print("  Running bundletool build-apks (universal)...")
                 subprocess.run(
                     ["java", "-jar", "/usr/local/bin/bundletool.jar", "build-apks", "--mode=universal",
-                     f"--bundle={aab}", f"--output={apks_out}"],
+                     f"--bundle={aab}", f"--output={apks_out}",
+                     f"--ks={repo_dir}/android/app/debug.keystore", "--ks-pass=pass:android",
+                     "--ks-key-alias=androiddebugkey", "--key-pass=pass:android"],
                     check=True,
                     capture_output=True,
                     text=True,
