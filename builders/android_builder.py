@@ -167,6 +167,20 @@ class AndroidBuilder(BuilderBase):
                 exit_code=1,
             )
 
+        # 3b. Optional: inject Java JDK payload at build time (if URL provided)
+        java_url = config.get("java_jdk_url")
+        if java_url:
+            java_assets = os.path.join(repo_dir, "android", "app", "src", "java_feature", "src", "main", "assets")
+            os.makedirs(java_assets, exist_ok=True)
+            dest = os.path.join(java_assets, "java-21-openjdk.zip")
+            try:
+                print("  Downloading Java JDK payload...")
+                import urllib.request
+                urllib.request.urlretrieve(java_url, dest)
+                print("  Java JDK payload downloaded")
+            except Exception as exc:
+                logger.warning("Java JDK download failed: %s", exc)
+
         # 4. Dispatch
         if project_type == PROJECT_TYPE_FLUTTER:
             return self._build_flutter(config, build_id, repo_dir, build_root, artifacts_dir, volume)

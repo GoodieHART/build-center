@@ -206,6 +206,11 @@ def main():
         "Access token (leave blank for public repos)"
     )
 
+    # 7b. Optional Java JDK payload URL (injected at build time)
+    java_jdk_url = wizard.prompt_string(
+        "Java JDK zip URL (optional, leave blank to skip)"
+    )
+
     # 6. Fetch / fallback for SDK platforms
     prov = AndroidProvisioner()
     try:
@@ -296,6 +301,8 @@ def main():
         config["access_token"] = access_token
     if ndk_version:
         config["ndk_version"] = ndk_version
+    if java_jdk_url:
+        config["java_jdk_url"] = java_jdk_url
 
     # 13. Validate secret before dispatching remote build
     if not validate_secret_exists(BUILD_CENTER_SECRET_NAME):
