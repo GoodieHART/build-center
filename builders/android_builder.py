@@ -440,6 +440,8 @@ class AndroidBuilder(BuilderBase):
                 apk_files.append(dest)
             if not apk_files:
                 return failed("verify_apk", "No APK found after build", exit_code=1)
+            # Align/recompress/sign so Android accepts the artifact.
+            apk_files = [self._compress_apk(p) for p in apk_files]
             apk = apk_files[-1]
             if volume is not None:
                 try:
@@ -744,45 +746,128 @@ class AndroidBuilder(BuilderBase):
             logger.warning("Could not write key.properties: %s", exc)
 
     def _compress_apk(self, apk_path: str) -> str:
-        """Best-effort extreme compression of an APK.
+        """Align, recompress and sign an APK so Android can install it.
 
-        Runs ``zipalign`` (from the Android build-tools) to 4-byte align
-        entries, then ``advzip -z4`` (advancecomp) if available for an extra
-        recompression pass that does not alter the APK structure. Both steps
-        are optional and skipped gracefully when the tooling is missing.
+        Order matters: ``zipalign`` → ``advzip`` → signing.  Any rewrite of
+        the zip invalidates an existing signature, so the APK must be signed
+        **last**.  The container runs as root, which stops Flutter from
+        signing its own output, so signing here is what makes the artifact
+        installable.
         """
         if not os.path.isfile(apk_path):
             return apk_path
         aligned = apk_path + ".aligned"
-        # 1. zipalign
-        build_tools = None
-        try:
-            import glob as _g
-            candidates = _g.glob("/builds/.cache/sdk/android/build-tools/*/zipalign")
-            if candidates:
-                build_tools = sorted(candidates)[-1]
-        except Exception:
-            build_tools = None
-        if build_tools and os.path.isfile(build_tools):
+
+        # 1. zipalign (4-byte alignment)
+        zipalign = self._find_sdk_tool("zipalign")
+        if zipalign:
             try:
-                subprocess.run([build_tools, "-f", "4", apk_path, aligned],
+                subprocess.run([zipalign, "-f", "4", apk_path, aligned],
                                check=True, capture_output=True, timeout=300)
                 if os.path.isfile(aligned):
                     os.replace(aligned, apk_path)
-                    logger.info("zipaligned %s", apk_path)
+                    print("  zipaligned APK")
             except Exception as exc:
                 logger.warning("zipalign failed: %s", exc)
                 if os.path.isfile(aligned):
                     os.remove(aligned)
-        # 2. advzip (extra recompression) if present
+
+        # 2. advzip (extra recompression) — must happen BEFORE signing
         if shutil.which("advzip"):
             try:
                 subprocess.run(["advzip", "-z4", apk_path],
                                check=True, capture_output=True, timeout=600)
-                logger.info("advzip recompressed %s", apk_path)
+                print("  advzip recompressed APK")
             except Exception as exc:
                 logger.warning("advzip failed: %s", exc)
+
+        # 3. Sign LAST — any zip rewrite above invalidates a prior signature.
+        #    The container runs as root, so Flutter never signs its output and
+        #    the artifact must be signed here or Android rejects it.
+        ks_path = self._ensure_debug_keystore()
+        apksigner = self._find_sdk_tool("apksigner")
+        signed = False
+        print(f"  Signing APK (apksigner={apksigner}, keystore={ks_path})")
+        if apksigner and ks_path:
+            try:
+                subprocess.run(
+                    [apksigner, "sign", "--ks", ks_path,
+                     "--ks-pass", "pass:android", "--key-pass", "pass:android",
+                     "--ks-key-alias", "androiddebugkey",
+                     "--v1-signing-enabled", "true",
+                     "--v2-signing-enabled", "true",
+                     "--v3-signing-enabled", "true", apk_path],
+                    check=True, capture_output=True, timeout=300,
+                )
+                signed = True
+                print("  APK signed (apksigner v1/v2/v3)")
+            except Exception as exc:
+                logger.warning("apksigner failed: %s", exc)
+        if not signed:
+            # Fallback: JAR signing (v1 only).
+            try:
+                subprocess.run(
+                    ["jarsigner", "-sigalg", "SHA256withRSA", "-digestalg", "SHA-256",
+                     "-keystore", ks_path, "-storepass", "android", "-keypass", "android",
+                     apk_path, "androiddebugkey"],
+                    check=True, capture_output=True, timeout=300,
+                )
+                signed = True
+                print("  APK signed (jarsigner v1)")
+            except Exception as exc:
+                logger.warning("jarsigner failed: %s", exc)
+
+        # 4. Verify the signature so failures surface in the build log.
+        if signed and apksigner:
+            try:
+                res = subprocess.run([apksigner, "verify", apk_path],
+                                     capture_output=True, text=True, timeout=300)
+                if res.returncode == 0:
+                    print("  APK signature verified")
+                else:
+                    logger.warning("apksigner verify failed: %s", res.stderr[-500:])
+                    print("  WARNING: APK signature verification FAILED")
+            except Exception as exc:
+                logger.warning("apksigner verify error: %s", exc)
         return apk_path
+
+    @staticmethod
+    def _find_sdk_tool(tool_name: str) -> Optional[str]:
+        """Locate a build-tools binary (e.g. ``zipalign``, ``apksigner``).
+
+        Looks in the cached Android SDK under the Modal volume first, then
+        falls back to ``PATH``.
+        """
+        import glob as _g
+        for pattern in (
+            f"/builds/.cache/sdk/android/build-tools/*/{tool_name}",
+            f"/opt/android-sdk/build-tools/*/{tool_name}",
+        ):
+            candidates = sorted(_g.glob(pattern))
+            if candidates:
+                return candidates[-1]
+        return shutil.which(tool_name)
+
+    @staticmethod
+    def _ensure_debug_keystore() -> str:
+        """Return the path to a debug keystore, generating one if needed."""
+        ks_dir = os.path.expanduser("~/.android")
+        ks_path = os.path.join(ks_dir, "debug.keystore")
+        if os.path.isfile(ks_path):
+            return ks_path
+        os.makedirs(ks_dir, exist_ok=True)
+        try:
+            subprocess.run(
+                ["keytool", "-genkeypair", "-v", "-keystore", ks_path,
+                 "-storepass", "android", "-alias", "androiddebugkey",
+                 "-keypass", "android", "-keyalg", "RSA", "-keysize", "2048",
+                 "-validity", "10000",
+                 "-dname", "CN=Android Debug,O=Android,C=US"],
+                check=True, capture_output=True, timeout=120,
+            )
+        except Exception as exc:
+            logger.warning("debug keystore generation failed: %s", exc)
+        return ks_path
 
     @staticmethod
     def _enable_gradle_parallelism(android_dir: str) -> None:
