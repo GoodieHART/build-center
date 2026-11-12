@@ -31,7 +31,7 @@ app = modal.App("build-center")
 
 builder_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("openjdk-17-jdk", "git", "curl", "unzip", "build-essential", "xz-utils")
+    .apt_install("openjdk-17-jdk", "git", "git-lfs", "curl", "unzip", "build-essential", "xz-utils")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs"
     )
@@ -147,6 +147,7 @@ def test_build_full():
         "ndk_version": "27.0.12077973",
         "flutter_version": "stable",
         "build_variant": "full",
+        "target_abi": "arm64-v8a",
     }
     print("Dispatching full test build...")
     result = build_android.remote(config)
@@ -201,6 +202,16 @@ def main():
         ["base", "full"], "Select build variant (base/full)"
     )
 
+    # 6b. Target ABI (only meaningful for the full variant)
+    if build_variant == "full":
+        target_abi = wizard.select_option(
+            ["universal (all ABIs)", "arm64-v8a", "armeabi-v7a", "x86", "x86_64"],
+            "Select target ABI for the full APK",
+        )
+        if target_abi.startswith("universal"):
+            target_abi = ""
+    else:
+        target_abi = ""
     # 7. Access token (optional — leave blank for public repos)
     access_token = wizard.prompt_string(
         "Access token (leave blank for public repos)"
@@ -271,6 +282,7 @@ def main():
         "Branch": branch,
         "Flutter Version": flutter_version,
         "Build Variant": build_variant,
+        "Target ABI": target_abi if target_abi else "universal (all ABIs)",
         "Access Token": "***" if access_token else "(none)",
         "SDK Platform": selected_platform,
         "Build Tools": build_tools,
@@ -295,6 +307,8 @@ def main():
         "flutter_version": flutter_version,
         "build_variant": build_variant,
     }
+    if target_abi:
+        config["target_abi"] = target_abi
     if access_token:
         config["access_token"] = access_token
     if ndk_version:

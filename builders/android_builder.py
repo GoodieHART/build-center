@@ -9,6 +9,7 @@ single entry point can build any of the supported project kinds.
 
 import glob as glob_module
 import logging
+import json
 import os
 import re
 import shutil
@@ -147,6 +148,17 @@ class AndroidBuilder(BuilderBase):
                 capture_output=False,
                 timeout=300,
             )
+            # Resolve Git LFS objects (large runtime archives).
+            try:
+                subprocess.run(
+                    ["git", "-C", repo_dir, "lfs", "pull"],
+                    check=True,
+                    capture_output=True,
+                    timeout=600,
+                )
+                print("  Git LFS objects pulled")
+            except Exception as exc:
+                logger.warning("git lfs pull failed (continuing): %s", exc)
             print("  Repository cloned")
             logger.info("Repository cloned into %s", repo_dir)
         except subprocess.TimeoutExpired:
@@ -250,6 +262,7 @@ class AndroidBuilder(BuilderBase):
         build_flavor = config.get("build_flavor", "release")
         flutter_version = config.get("flutter_version") or DEFAULT_FLUTTER_VERSION
         build_variant = (config.get("build_variant") or "base").lower()
+        target_abi = (config.get("target_abi") or "").strip()
 
         sdk_path = sdk_cache_path(VOLUME_ROOT).rstrip("/")
 
@@ -306,7 +319,7 @@ class AndroidBuilder(BuilderBase):
         # 4b. Enable Gradle parallelism for faster builds
         self._enable_gradle_parallelism(android_dir)
 
-        if build_variant == "full":
+        if build_variant == "full" and not target_abi:
             # 5. Full variant: build an AAB, then use bundletool to produce a
             #    single universal APK containing every dynamic-feature module.
             cmd = ["flutter", "build", "appbundle", build_mode_flag]
@@ -331,8 +344,9 @@ class AndroidBuilder(BuilderBase):
             if not aab_files:
                 return failed("verify_aab", f"No AAB found after build at {aab_pattern}", exit_code=1)
 
-            # bundletool -> universal APK
+            # bundletool -> APK for the requested ABI (or universal if none).
             aab = aab_files[-1]
+            target_abi = (config.get("target_abi") or "").strip()
             apks_out = os.path.join(artifacts_dir, "full.apks")
             try:
                 print("  Running bundletool build-apks (universal)...")
@@ -367,6 +381,9 @@ class AndroidBuilder(BuilderBase):
                 except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
                     logger.warning("Could not extract universal.apk: %s", exc)
 
+            # Universal APK already contains all runtimes for all ABIs.
+            # (Single-arch path is handled by the full+target_abi branch above
+            #  via payloads=all, no zip post-processing needed.)
             # Fallback: if bundletool/extraction failed, ship the AAB.
             if not apk_files:
                 for aab in aab_files:
@@ -392,6 +409,51 @@ class AndroidBuilder(BuilderBase):
                     artifacts=artifact_paths_aab,
                     download_cmd=download_cmd,
                 )
+        elif build_variant == "full":
+            # 5c. Single-arch full build: use payloads=all so all runtimes are
+            #     staged into the base module; flutter build apk signs/aligns
+            #     normally (no zip post-processing).
+            abi_map = {
+                "arm64-v8a": "android-arm64",
+                "armeabi-v7a": "android-arm",
+                "x86": "android-x86",
+                "x86_64": "android-x64",
+            }
+            tp = abi_map.get(target_abi, "android-arm64")
+            cmd = ["flutter", "build", "apk", build_mode_flag,
+                   f"--target-platform={tp}", "-Ppayloads=all"]
+            try:
+                print(f"  Running flutter build apk ({build_flavor}, full/{target_abi}, payloads=all)...")
+                rc, tail = self._run_streamed(
+                    cmd, cwd=repo_dir, env=env, timeout=1800, label="flutter build apk",
+                )
+                if rc != 0:
+                    print("  flutter build apk FAILED:\n" + tail)
+                    return failed("flutter_build", "flutter build apk failed: " + tail[-800:], exit_code=rc)
+            except subprocess.TimeoutExpired:
+                return failed("flutter_build", "flutter build apk timed out", exit_code=124)
+            apk_files = []
+            apk_pattern = os.path.join(repo_dir, "build", "app", "outputs", "flutter-apk", "*.apk")
+            for apk in sorted(glob_module.glob(apk_pattern)):
+                dest = os.path.join(artifacts_dir, os.path.basename(apk))
+                shutil.copy2(apk, dest)
+                apk_files.append(dest)
+            if not apk_files:
+                return failed("verify_apk", "No APK found after build", exit_code=1)
+            apk = apk_files[-1]
+            if volume is not None:
+                try:
+                    commit_volume(volume)
+                except Exception as exc:
+                    logger.warning("Volume commit failed: %s", exc)
+            apk_basename = os.path.basename(apk)
+            volume_path = f"/runs/{build_id}/artifacts/{apk_basename}"
+            download_cmd = f"modal volume get build-center-cache {volume_path} ."
+            return success(
+                message=f"Build {build_id} completed (full/{target_abi}, payloads=all)",
+                artifacts=apk_files,
+                download_cmd=download_cmd,
+            )
         else:
             # 5b. Base variant: standard flutter build apk
             cmd = ["flutter", "build", "apk", build_mode_flag]
